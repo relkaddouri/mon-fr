@@ -18,7 +18,7 @@ export const fail = (code, message, status = 500, detail) => json({ error: code,
 export function checkCode(req) {
   const code = env("APP_CODE");
   if (!code) return null;
-  if ((req.headers.get("x-app-code") || "").trim() === code.trim()) return null;
+  if ((req.headers.get("x-app-code") || "").trim().toLowerCase() === code.trim().toLowerCase()) return null;
   return fail("code", "Le code d'accès est faux. Vérifie-le dans les réglages de l'app.", 401);
 }
 

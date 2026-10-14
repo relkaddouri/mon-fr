@@ -38,7 +38,7 @@ export function loading(text) {
 }
 
 export function errorBox(err, retryId) {
-  return `<div class="banner warn fade-in"><div class="grow"><b>Oups.</b> ${esc(err?.message || "Une erreur est survenue.")}${retryId ? ` <button class="link" id="${retryId}">Réessayer</button>` : ""}</div></div>`;
+  return `<div class="banner warn fade-in"><div class="grow"><b>Oups.</b> ${esc(err?.message || "Une erreur est survenue.")}${err?.kind === "code" ? ` <a href="#/reglages">Entrer le code</a>` : retryId ? ` <button class="link" id="${retryId}">Réessayer</button>` : ""}</div></div>`;
 }
 
 export function fixList(list) {

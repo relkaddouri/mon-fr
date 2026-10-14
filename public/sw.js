@@ -1,5 +1,5 @@
 // Service worker : l'app s'ouvre même hors ligne (les fonctions IA demandent internet).
-const VERSION = "mf-v2";
+const VERSION = "mf-v3";
 const SHELL = [
   "/", "/index.html", "/styles.css", "/manifest.webmanifest", "/seed.js",
   "/js/app.js", "/js/store.js", "/js/api.js", "/js/prompts.js", "/js/ui.js", "/js/audio.js",
