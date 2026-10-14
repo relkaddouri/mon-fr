@@ -1,0 +1,6 @@
+{
+  "name": "mon-francais",
+  "private": true,
+  "type": "module",
+  "engines": { "node": "22.x" }
+}
