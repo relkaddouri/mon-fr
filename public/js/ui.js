@@ -38,7 +38,8 @@ export function loading(text) {
 }
 
 export function errorBox(err, retryId) {
-  return `<div class="banner warn fade-in"><div class="grow"><b>Oups.</b> ${esc(err?.message || "Une erreur est survenue.")}${err?.kind === "code" ? ` <a href="#/reglages">Entrer le code</a>` : retryId ? ` <button class="link" id="${retryId}">Réessayer</button>` : ""}</div></div>`;
+  if (err?.detail) console.warn("Détail de l'erreur :", err.detail);
+  return `<div class="banner warn fade-in"><div class="grow"><b>Oups.</b> ${esc(err?.message || "Une erreur est survenue.")}${err?.detail ? `<details style="margin-top:6px"><summary class="tiny muted">Détail technique</summary><code class="tiny" style="display:block;white-space:pre-wrap;word-break:break-all;margin-top:4px">${esc(String(err.detail).slice(0, 400))}</code></details>` : ""}${err?.kind === "code" ? ` <a href="#/reglages">Entrer le code</a>` : retryId ? ` <button class="link" id="${retryId}">Réessayer</button>` : ""}</div></div>`;
 }
 
 export function fixList(list) {

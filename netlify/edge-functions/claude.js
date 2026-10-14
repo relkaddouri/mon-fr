@@ -39,13 +39,23 @@ export default async (req) => {
   if (!Array.isArray(messages) || !messages.length) return fail("no_messages", "Message vide.", 400);
 
   const payload = {
-    max_tokens: Math.min(Number(max_tokens) || 1500, 4000),
+    max_tokens: Math.min(Number(max_tokens) || 1500, 8000),
     messages: messages.slice(-40),
     ...(typeof system === "string" && system ? { system } : {}),
   };
 
+  // DeepSeek : on coupe le mode « réflexion », qui consomme les jetons et retarde la réponse.
+  if (p.name === "deepseek" && !/reasoner|think/i.test(p.model)) payload.thinking = { type: "disabled" };
+
   let model = p.model || (await findModel(p));
   let res = await call(p, model, payload);
+
+  // Si l'API refuse le paramètre « thinking », on réessaie sans.
+  if (!res.ok && res.status === 400 && payload.thinking) {
+    const text = await res.text();
+    if (/thinking/i.test(text)) { delete payload.thinking; res = await call(p, model, payload); }
+    else return fail(...explainAnthropic(res.status, text, p), 502, text.slice(0, 300));
+  }
 
   if (!res.ok && (res.status === 404 || res.status === 400) && p.name === "anthropic") {
     const text = await res.text();

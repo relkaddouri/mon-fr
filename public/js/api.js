@@ -48,7 +48,11 @@ async function post(url, init) {
 }
 
 // Envoie une conversation à Claude et reçoit la réponse au fil de l'eau.
-export async function claude({ system, messages, max_tokens = 1500, onText, signal }) {
+export async function claude(opts) {
+  return (await claudeRaw(opts)).text;
+}
+
+export async function claudeRaw({ system, messages, max_tokens = 1500, onText, signal }) {
   const res = await post("/api/claude", {
     headers: headers({ "content-type": "application/json" }),
     body: JSON.stringify({ system, messages, max_tokens }),
@@ -59,7 +63,7 @@ export async function claude({ system, messages, max_tokens = 1500, onText, sign
 
   const reader = res.body.getReader();
   const dec = new TextDecoder();
-  let buf = "", text = "", finished = false, stop = "";
+  let buf = "", text = "", finished = false, stop = "", thinking = 0;
   const handle = (chunk) => {
     for (const line of chunk.split("\n")) {
       if (!line.startsWith("data:")) continue;
@@ -70,6 +74,8 @@ export async function claude({ system, messages, max_tokens = 1500, onText, sign
       if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") {
         text += ev.delta.text;
         onText && onText(text);
+      } else if (ev.type === "content_block_delta" && ev.delta?.type === "thinking_delta") {
+        thinking += (ev.delta.thinking || "").length;
       } else if (ev.type === "message_delta") {
         stop = ev.delta?.stop_reason || stop;
       } else if (ev.type === "message_stop") {
@@ -95,23 +101,61 @@ export async function claude({ system, messages, max_tokens = 1500, onText, sign
   if (buf.trim()) handle(buf);
   if (!finished && !text) throw new ApiError("cut", "La réponse a été coupée. Réessaie.");
   if (!finished) throw new ApiError("cut", "La réponse a été coupée avant la fin. Réessaie.");
-  return text;
+  return { text, stop, thinking };
+}
+
+// Lecture tolérante du JSON renvoyé par l'IA : blocs ```json, retours à la ligne
+// dans les chaînes, virgules en trop, réponse coupée en fin de course.
+function repairJSON(raw) {
+  let out = "", inStr = false, esc = false;
+  const stack = [];
+  for (const ch of raw) {
+    if (inStr) {
+      if (esc) { out += ch; esc = false; continue; }
+      if (ch === "\\") { out += ch; esc = true; continue; }
+      if (ch === '"') { inStr = false; out += ch; continue; }
+      if (ch === "\n") { out += "\\n"; continue; }
+      if (ch === "\r") continue;
+      if (ch === "\t") { out += "\\t"; continue; }
+      out += ch; continue;
+    }
+    if (ch === '"') { inStr = true; out += ch; continue; }
+    if (ch === "{" || ch === "[") stack.push(ch === "{" ? "}" : "]");
+    else if (ch === "}" || ch === "]") stack.pop();
+    out += ch;
+  }
+  if (inStr) out += '"';
+  out = out.replace(/,\s*$/, "");
+  while (stack.length) out += stack.pop();
+  return out.replace(/,\s*([}\]])/g, "$1");
 }
 
 export function parseJSON(text) {
-  const clean = String(text).replace(/```(?:json)?/g, "");
-  const s = clean.indexOf("{"), e = clean.lastIndexOf("}");
-  if (s < 0 || e <= s) throw new ApiError("format", "Réponse inattendue de l'IA. Réessaie.");
-  const raw = clean.slice(s, e + 1);
-  try { return JSON.parse(raw); } catch {}
-  // Petites réparations : virgules en trop, guillemets typographiques autour des clés.
-  try { return JSON.parse(raw.replace(/,\s*([}\]])/g, "$1")); } catch {}
-  throw new ApiError("format", "Réponse inattendue de l'IA. Réessaie.");
+  const clean = String(text || "").replace(/```(?:json|JSON)?/g, "");
+  const s = clean.indexOf("{");
+  if (s < 0) throw new ApiError("format", "Réponse inattendue de l'IA. Réessaie.", String(text || "").slice(0, 200));
+  const e = clean.lastIndexOf("}");
+  const tries = [];
+  if (e > s) tries.push(clean.slice(s, e + 1));
+  tries.push(clean.slice(s));
+  for (const raw of tries) {
+    try { return JSON.parse(raw); } catch {}
+    try { return JSON.parse(repairJSON(raw)); } catch {}
+  }
+  throw new ApiError("format", "Réponse inattendue de l'IA. Réessaie.", clean.slice(0, 200));
 }
 
+const STRICT = "\n\nIMPORTANT : réponds uniquement avec l'objet JSON, sans texte avant ni après, sans bloc de code. Les valeurs ne contiennent pas de retour à la ligne. Utilise les guillemets droits \" pour le JSON.";
+
+// Demande un JSON ; si la réponse est illisible ou coupée, un second essai plus strict et plus long.
 export async function claudeJSON({ system, prompt, max_tokens = 2000, signal }) {
-  const text = await claude({ system, messages: [{ role: "user", content: prompt }], max_tokens, signal });
-  return parseJSON(text);
+  let r = await claudeRaw({ system, messages: [{ role: "user", content: prompt + STRICT }], max_tokens, signal });
+  try {
+    const data = parseJSON(r.text);
+    if (r.stop !== "max_tokens") return data;
+  } catch (e) { console.warn("JSON illisible, nouvel essai", r.stop, r.thinking, r.text.slice(0, 300)); }
+  r = await claudeRaw({ system, messages: [{ role: "user", content: prompt + STRICT }], max_tokens: Math.min(8000, Math.round(max_tokens * 2.5)), signal });
+  return parseJSON(r.text);
 }
 
 export async function transcribe(blob) {
